@@ -307,8 +307,32 @@ export async function POST(req: NextRequest) {
 
         const responseText = await analyzeRentalDocuments(prompt, geminiParts);
 
-        const jsonString = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
-        const data = JSON.parse(jsonString);
+        if (!responseText || responseText.trim() === "") {
+            return NextResponse.json({ error: "Empty response from AI" }, { status: 500 });
+        }
+
+        // Robust cleanup of markdown or chatter if JSON mode fails
+        let cleanedResult = responseText.trim();
+        if (cleanedResult.includes("{")) {
+            // If there's conversational filler, find the first '{' and last '}'
+            const start = cleanedResult.indexOf("{");
+            const end = cleanedResult.lastIndexOf("}");
+            if (start !== -1 && end !== -1 && end > start) {
+                cleanedResult = cleanedResult.substring(start, end + 1);
+            }
+        }
+
+        let data;
+        try {
+            data = JSON.parse(cleanedResult);
+        } catch (e) {
+            console.error("Failed to parse Gemini JSON:", cleanedResult);
+            return NextResponse.json({
+                error: "The AI returned an invalid response. Please try re-sending with slightly fewer files.",
+                raw: cleanedResult.substring(0, 500)
+            }, { status: 500 });
+        }
+
         // Overwrite Gemini's list with our reliable manifest from the recursive read
         data.all_files_detected = manifest;
 
