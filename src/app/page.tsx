@@ -44,6 +44,15 @@ export default function Home() {
     setError(null);
     setResult(null);
 
+    const totalSize = [...filesCurrent, ...filesPrior, ...filesT776].reduce((acc, f) => acc + f.size, 0);
+    const MAX_SIZE = 4.4 * 1024 * 1024; // 4.4MB limit for Vercel
+
+    if (totalSize > MAX_SIZE) {
+      setError(`Upload total (${(totalSize / 1024 / 1024).toFixed(2)}MB) exceeds the 4.5MB limit. Please remove some files or use smaller PDFs.`);
+      setIsAnalyzing(false);
+      return;
+    }
+
     const formData = new FormData();
     filesPrior.forEach(f => {
       const path = f.webkitRelativePath || f.name;
@@ -65,12 +74,26 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Analysis failed");
+        const text = await response.text();
+        let errMsg = "Analysis failed";
+        try {
+          const errData = JSON.parse(text);
+          errMsg = errData.error || errMsg;
+        } catch {
+          if (response.status === 413) errMsg = "The total file size is too large for the server. Try uploading fewer files at once.";
+          else if (text.length < 200) errMsg = text;
+        }
+        throw new Error(errMsg);
       }
 
-      const data = await response.json();
-      setResult(data.data);
+      const text = await response.text();
+      try {
+        const data = JSON.parse(text);
+        setResult(data.data);
+      } catch (e) {
+        console.error("Malformed JSON:", text);
+        throw new Error("The AI returned an invalid response format. Please try again with fewer files.");
+      }
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "An error occurred");
