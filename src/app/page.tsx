@@ -59,7 +59,7 @@ export default function Home() {
     });
 
     try {
-      const response = await fetch("api/analyze", {
+      const response = await fetch("/api/analyze", {
         method: "POST",
         body: formData,
       });
