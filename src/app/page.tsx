@@ -1,0 +1,307 @@
+"use client";
+
+import { useState } from "react";
+import { FileUpload } from "@/components/file-upload";
+import { Loader2, FileSpreadsheet, Package } from "lucide-react";
+import { generateAuditPackage } from "@/utils/export-client";
+
+interface SourceMapping {
+  amount: number;
+  source_file: string;
+}
+
+interface PropertyData {
+  address: string;
+  income: Record<string, SourceMapping>;
+  income_prior: Record<string, number>;
+  expenses: Record<string, SourceMapping>;
+  expenses_prior: Record<string, number>;
+  source_files_read: string[];
+  notes: string;
+}
+
+interface AnalysisResult {
+  properties: PropertyData[];
+  email_draft?: string;
+  tax_year?: number;
+  all_files_detected: string[];
+}
+
+export default function Home() {
+  const [filesCurrent, setFilesCurrent] = useState<File[]>([]);
+  const [filesPrior, setFilesPrior] = useState<File[]>([]);
+  const [filesT776, setFilesT776] = useState<File[]>([]);
+
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleAnalyze = async () => {
+    if (filesCurrent.length === 0) return;
+
+    setIsAnalyzing(true);
+    setError(null);
+    setResult(null);
+
+    const formData = new FormData();
+    filesPrior.forEach(f => {
+      const path = f.webkitRelativePath || f.name;
+      formData.append("files_prior", f, path);
+    });
+    filesT776.forEach(f => {
+      const path = f.webkitRelativePath || f.name;
+      formData.append("files_t776", f, path);
+    });
+    filesCurrent.forEach(f => {
+      const path = f.webkitRelativePath || f.name;
+      formData.append("files_current", f, path);
+    });
+
+    try {
+      const response = await fetch("api/analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Analysis failed");
+      }
+
+      const data = await response.json();
+      setResult(data.data);
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleDownloadPackage = async () => {
+    if (!result) return;
+    setIsExporting(true);
+    try {
+      const blob = await generateAuditPackage(result, [...filesCurrent, ...filesPrior, ...filesT776]);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Rental_Tax_Package_${result.tax_year || 'Audit'}.zip`;
+      a.click();
+    } catch (e) {
+      console.error(e);
+      alert("Failed to generate Audit Package ZIP");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="bg-blue-600 p-1.5 rounded-lg">
+              <FileSpreadsheet className="w-5 h-5 text-white" />
+            </div>
+            <span className="text-xl font-extrabold tracking-tight text-gray-900">
+              TaxFlow <span className="text-blue-600 underline decoration-blue-200 underline-offset-4">Rental</span>
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-10">
+        <div className="text-center space-y-3">
+          <h1 className="text-4xl font-black text-gray-900 tracking-tight">
+            Rental Tax Automation
+          </h1>
+          <p className="text-lg text-gray-600 max-w-2xl mx-auto font-medium">
+            AI-powered T776 categorization with full source file auditing.
+          </p>
+        </div>
+
+        <div className="bg-white p-8 rounded-2xl shadow-xl shadow-blue-900/5 border border-gray-100 space-y-10">
+          <div className="grid md:grid-cols-2 gap-8">
+            <FileUpload
+              title="1. Prior Year Files"
+              description="Historical receipts for context."
+              onFilesSelected={setFilesPrior}
+              isLoading={isAnalyzing}
+            />
+            <FileUpload
+              title="2. Prior Year T776"
+              description="Last year's final return for template mapping."
+              onFilesSelected={setFilesT776}
+              isLoading={isAnalyzing}
+            />
+          </div>
+
+          <div className="pt-8 border-t border-gray-100">
+            <FileUpload
+              title="3. Current Year Documents"
+              description="Receipts, bank statements, and invoices for the new tax year."
+              onFilesSelected={setFilesCurrent}
+              isLoading={isAnalyzing}
+            />
+          </div>
+
+          <div className="flex justify-center pt-2">
+            <button
+              onClick={handleAnalyze}
+              disabled={filesCurrent.length === 0 || isAnalyzing}
+              className="group relative inline-flex items-center px-10 py-4 bg-blue-600 text-white font-bold text-lg rounded-full shadow-lg hover:bg-blue-700 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed"
+            >
+              {isAnalyzing ? (
+                <>
+                  <Loader2 className="animate-spin -ml-1 mr-3 h-6 w-6" />
+                  Building Tax Model...
+                </>
+              ) : (
+                "Execute Analysis"
+              )}
+              <div className="absolute -inset-1 rounded-full bg-blue-400 opacity-20 group-hover:opacity-40 blur-lg transition-opacity animate-pulse pointer-events-none"></div>
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border-l-4 border-red-500 p-5 rounded-r-xl animate-in shake duration-300">
+            <div className="flex">
+              <div className="ml-3">
+                <p className="text-sm font-bold text-red-800">Processing Error</p>
+                <p className="text-sm text-red-700 mt-1">{error}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {result && (
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
+            <div className="flex items-center justify-between border-b border-gray-200 pb-5">
+              <div>
+                <h2 className="text-3xl font-black text-gray-900 tracking-tight">Analysis Complete</h2>
+                <p className="text-gray-500 mt-1 font-medium">Verify your properties and categories below.</p>
+              </div>
+              <button
+                onClick={handleDownloadPackage}
+                disabled={isExporting}
+                className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 hover:shadow-green-900/20 active:translate-y-0.5 transition-all disabled:opacity-50"
+              >
+                {isExporting ? (
+                  <Loader2 className="w-5 h-5 mr-3 animate-spin" />
+                ) : (
+                  <Package className="w-5 h-5 mr-3" />
+                )}
+                Download Audit Package (.ZIP)
+              </button>
+            </div>
+
+            <div className="grid gap-8">
+              {result.properties?.map((property, idx) => (
+                <div key={idx} className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden group transition-all hover:border-blue-200 hover:shadow-blue-900/5">
+                  <div className="bg-gray-50/50 px-8 py-5 border-b border-gray-200 flex justify-between items-center group-hover:bg-blue-50/30 transition-colors">
+                    <h3 className="text-xl font-extrabold text-gray-900">{property.address || "New Property Location"}</h3>
+                    <div className="flex gap-2">
+                      <span className="px-3 py-1 bg-white border border-gray-200 rounded-full text-xs font-bold text-gray-600 uppercase tracking-widest">
+                        {result.tax_year} RETURN
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-8 grid lg:grid-cols-2 gap-10">
+                    <div>
+                      <h4 className="flex items-center text-xs font-black text-blue-600 uppercase tracking-widest mb-6 px-1">
+                        <div className="w-2 h-2 rounded-full bg-blue-600 mr-2"></div>
+                        Income Stream
+                      </h4>
+                      <div className="space-y-2">
+                        {property.income && Object.entries(property.income).map(([cat, detail]) => (
+                          <div key={cat} className="flex flex-col p-3 rounded-lg hover:bg-gray-50 transition-colors">
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm font-semibold text-gray-700 capitalize">{cat}</span>
+                              <span className="text-sm font-black text-gray-900 font-mono">${detail.amount?.toLocaleString()}</span>
+                            </div>
+                            {detail.source_file && (
+                              <span className="text-[10px] text-gray-400 mt-1 italic">Source: {detail.source_file}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="flex items-center text-xs font-black text-orange-600 uppercase tracking-widest mb-6 px-1">
+                        <div className="w-2 h-2 rounded-full bg-orange-600 mr-2"></div>
+                        Operating Expenses
+                      </h4>
+                      <div className="space-y-2">
+                        {property.expenses && Object.entries(property.expenses).map(([cat, detail]) => (
+                          <div key={cat} className="flex flex-col p-3 rounded-lg hover:bg-gray-50 transition-colors">
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm font-semibold text-gray-700 capitalize">{cat}</span>
+                              <span className="text-sm font-black text-gray-900 font-mono">${detail.amount?.toLocaleString()}</span>
+                            </div>
+                            {detail.source_file && (
+                              <span className="text-[10px] text-gray-400 mt-1 italic">Source: {detail.source_file}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {property.notes && (
+                    <div className="mx-8 mb-8 p-4 bg-amber-50 rounded-xl border border-amber-100">
+                      <h4 className="text-xs font-black text-amber-800 uppercase tracking-widest mb-1">Tax Adjustments / Auditor Notes</h4>
+                      <p className="text-sm text-amber-900 leading-relaxed">{property.notes}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {result.email_draft && (
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden mt-10">
+                <div className="bg-indigo-600 px-8 py-5">
+                  <h3 className="text-lg font-bold text-white uppercase tracking-wider flex items-center">
+                    <Loader2 className="w-5 h-5 mr-3 opacity-50" />
+                    Generated Client Inquiry Draft
+                  </h3>
+                </div>
+                <div className="p-8">
+                  <textarea
+                    className="w-full h-80 p-6 bg-gray-50 border border-gray-200 rounded-2xl font-mono text-sm leading-relaxed focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-none"
+                    readOnly
+                    value={result.email_draft}
+                  />
+                  <div className="mt-4 flex justify-between items-center">
+                    <p className="text-xs text-gray-500 uppercase font-black tracking-widest">Client Communication Block</p>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(result.email_draft || "");
+                        alert("Copied to clipboard!");
+                      }}
+                      className="text-indigo-600 font-bold text-xs hover:underline"
+                    >
+                      COPY TO CLIPBOARD
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+
+      <footer className="py-10 border-t border-gray-200 bg-white">
+        <div className="max-w-7xl mx-auto px-4 text-center">
+          <p className="text-xs text-gray-400 font-bold uppercase tracking-[0.2em]">
+            Verified Audit Trail &bull; Gemini 2.0 Flash &bull; Multi-Part T776 Processing
+          </p>
+        </div>
+      </footer>
+    </div>
+  );
+}
