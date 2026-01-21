@@ -6,7 +6,10 @@ if (!process.env.GEMINI_API_KEY) {
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-export const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+export const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    generationConfig: { responseMimeType: "application/json" }
+});
 
 export async function analyzeRentalDocuments(prompt: string, fileParts: { inlineData: { data: string; mimeType: string } }[]) {
     const maxRetries = 6;
