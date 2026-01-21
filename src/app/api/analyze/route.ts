@@ -74,7 +74,12 @@ async function processFile(
 
     try {
         if (filename.endsWith(".msg")) {
-            const msgReader = new MsgReader(toBuffer(fileBuffer));
+            // Convert Node.js Buffer to ArrayBuffer for MsgReader
+            const arrayBuffer = fileBuffer.buffer.slice(
+                fileBuffer.byteOffset,
+                fileBuffer.byteOffset + fileBuffer.byteLength
+            );
+            const msgReader = new MsgReader(arrayBuffer as ArrayBuffer);
             const fileData = msgReader.getFileData();
 
             let emailText = `--- EMAIL: ${normalizedName} ---\n`;
