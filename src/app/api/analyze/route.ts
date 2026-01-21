@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeRentalDocuments } from "@/lib/gemini";
+import { del } from "@vercel/blob";
 import mammoth from "mammoth";
 import MsgReader from "@kenjiuno/msgreader";
-
 import * as XLSX from "xlsx";
 
-export const maxDuration = 60; // Increase to 60 seconds for large uploads
+export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 // Helper to convert ArrayBuffer to Buffer
@@ -19,7 +19,6 @@ function toBuffer(arrayBuffer: ArrayBuffer) {
 }
 
 // Helper to identify MIME type from filename/content
-// Helper to identify MIME type from filename/content
 function getMimeType(filename: string): string {
     const ext = filename.split(".").pop()?.toLowerCase();
     switch (ext) {
@@ -28,231 +27,190 @@ function getMimeType(filename: string): string {
         case "jpg":
         case "jpeg": return "image/jpeg";
         case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-        case "doc": return "application/msword";
-        case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-        case "xls": return "application/vnd.ms-excel";
-        case "csv": return "text/csv";
         case "msg": return "application/vnd.ms-outlook";
-        case "txt": return "text/plain";
+        case "xlsx":
+        case "xls": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        case "csv": return "text/csv";
         default: return "application/octet-stream";
     }
 }
 
-const SUPPORTED_EXTENSIONS = ["pdf", "png", "jpg", "jpeg", "docx", "doc", "xlsx", "xls", "csv", "msg", "txt"];
-const IGNORED_FILES = [".ds_store", "thumbs.db", "desktop.ini"];
-
-function isSupportedFile(filename: string): boolean {
-    const ext = filename.split(".").pop()?.toLowerCase();
-    const name = filename.split(/[\/\\]/).pop()?.toLowerCase();
-    if (!ext || !name) return false;
-    if (IGNORED_FILES.includes(name)) return false;
-    return SUPPORTED_EXTENSIONS.includes(ext);
+// Helper to check if file should be skipped
+function shouldSkipFile(filename: string): boolean {
+    const skipPatterns = [
+        /^\./, // Hidden files
+        /^~\$/, // Temp files
+        /\.tmp$/i,
+        /\.DS_Store$/i,
+        /Thumbs\.db$/i,
+    ];
+    return skipPatterns.some(pattern => pattern.test(filename));
 }
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
+
+// Recursive file processor
 async function processFile(
-    file: File | { name: string, arrayBuffer: () => Promise<ArrayBuffer> },
+    fileBuffer: Buffer,
+    filename: string,
     manifest: string[],
-    parentPath: string = ""
-): Promise<any[]> {
-    const normalizedName = file.name.replace(/\\/g, "/");
+    currentPath: string
+): Promise<{ inlineData: { data: string; mimeType: string } }[]> {
+    const normalizedName = currentPath || filename;
 
-    if (!isSupportedFile(normalizedName)) {
-        console.log(`Skipping unsupported/system file: ${normalizedName}`);
+    if (shouldSkipFile(filename)) {
+        console.log(`Skipping file: ${normalizedName}`);
         return [];
     }
 
-    const buffer = toBuffer(await file.arrayBuffer());
-
-    // Prevent processing massive files that aren't PDFs/Images (e.g. huge CSVs)
-    if (buffer.length > 10 * 1024 * 1024) { // 10MB limit per file
-        console.warn(`File ${normalizedName} is too large (${(buffer.length / 1024 / 1024).toFixed(2)} MB), skipping.`);
+    if (fileBuffer.length > MAX_FILE_SIZE) {
+        console.log(`File too large, skipping: ${normalizedName}`);
         return [];
     }
 
-    const mimeType = ("type" in file) ? file.type : getMimeType(normalizedName);
-    const parts = [];
+    manifest.push(normalizedName);
+    const parts: { inlineData: { data: string; mimeType: string } }[] = [];
+    const mimeType = getMimeType(filename);
 
-    const currentPath = parentPath ? `${parentPath} > ${normalizedName}` : normalizedName;
-    manifest.push(currentPath);
+    try {
+        if (filename.endsWith(".msg")) {
+            const msgReader = new MsgReader(toBuffer(fileBuffer));
+            const fileData = msgReader.getFileData();
 
-    if (mimeType === "application/pdf" || mimeType.startsWith("image/")) {
-        parts.push({
-            inlineData: {
-                data: buffer.toString("base64"),
-                mimeType: mimeType,
-            },
-        });
-        // Add a text label so Gemini knows which file this binary data belongs to
-        parts.push({
-            inlineData: {
-                data: Buffer.from(`[BINARY FILE: ${currentPath}]`).toString("base64"),
-                mimeType: "text/plain",
+            let emailText = `--- EMAIL: ${normalizedName} ---\n`;
+            if (fileData.headers) {
+                emailText += `From: ${fileData.senderName || fileData.senderEmail || "Unknown"}\n`;
+                emailText += `To: ${fileData.recipients?.map((r: any) => r.name || r.email).join(", ") || "Unknown"}\n`;
+                emailText += `Subject: ${fileData.subject || "No Subject"}\n`;
             }
-        });
-    } else if (
-        mimeType.includes("spreadsheet") ||
-        mimeType.includes("excel") ||
-        mimeType === "text/csv"
-    ) {
-        // Parse Excel/CSV to Text
-        try {
-            const workbook = XLSX.read(buffer, { type: 'buffer' });
-            let allText = "";
-            workbook.SheetNames.forEach(sheetName => {
-                const sheet = workbook.Sheets[sheetName];
-                const csv = XLSX.utils.sheet_to_csv(sheet);
-                allText += `\nSheet: ${sheetName}\n${csv}\n`;
-            });
+            emailText += `\nBody:\n${fileData.body || "(No body text)"}\n`;
+
             parts.push({
                 inlineData: {
-                    data: Buffer.from(`FILE CONTENT (${currentPath}):\n${allText}`).toString("base64"),
+                    data: Buffer.from(emailText).toString("base64"),
                     mimeType: "text/plain",
                 },
             });
-        } catch (err) {
-            console.error(`Failed to parse spreadsheet ${normalizedName}`, err);
-        }
-    } else if (
-        mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    ) {
-        const { value: text } = await mammoth.extractRawText({ buffer });
-        parts.push({
-            inlineData: {
-                data: Buffer.from(`FILE CONTENT (${currentPath}):\n${text}`).toString("base64"),
-                mimeType: "text/plain",
-            },
-        });
-    } else if (normalizedName.endsWith(".msg") || mimeType === "application/vnd.ms-outlook") {
-        const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-        const msgReader = new MsgReader(arrayBuffer);
-        const fileData = msgReader.getFileData();
 
-        // 1. Add Email Headers and Body
-        const headerInfo = `
-[EMAIL METADATA]
-From: ${fileData.senderName} <${fileData.senderEmail}>
-To: ${fileData.recipients?.map(r => `${r.name} <${r.email}>`).join("; ")}
-Subject: ${fileData.subject}
-`.trim();
-
-        if (fileData.body || headerInfo) {
-            parts.push({
-                inlineData: {
-                    data: Buffer.from(`${headerInfo}\n\n[BODY]\n${fileData.body || ""}`).toString("base64"),
-                    mimeType: "text/plain",
-                },
-            });
-        }
-
-        // 2. Process Attachments
-        if (fileData.attachments && fileData.attachments.length > 0) {
-            for (const attach of fileData.attachments) {
-                try {
-                    const attachData = msgReader.getAttachment(attach);
-                    if (attachData) {
-                        const attachName = (attachData.fileName || "unnamed_attachment").replace(/\\/g, "/");
-                        console.log(`[MSG] found attachment: ${attachName} in ${normalizedName}`);
-                        const attachContent = Buffer.from(attachData.content);
-
-                        // Recursively process this attachment as if it were a file
-                        // We create a "virtual file" object
-                        const virtualFile = {
-                            name: attachName,
-                            arrayBuffer: async () => attachContent.buffer as ArrayBuffer
-                        };
-
-                        // Add context marker for the attachment
-                        parts.push({
-                            inlineData: {
-                                data: Buffer.from(`[ATTACHMENT: ${attachName} found in ${normalizedName}]`).toString("base64"),
-                                mimeType: "text/plain",
-                            }
-                        });
-
-                        const childParts = await processFile(virtualFile, manifest, currentPath);
-                        parts.push(...childParts);
+            if (fileData.attachments && fileData.attachments.length > 0) {
+                console.log(`Found ${fileData.attachments.length} attachments in ${normalizedName}`);
+                for (const attach of fileData.attachments) {
+                    const attachmentData = msgReader.getAttachment(attach);
+                    if (attachmentData && attachmentData.content) {
+                        const attachBuffer = Buffer.from(attachmentData.content);
+                        const attachFilename = attachmentData.fileName || "attachment";
+                        const attachPath = `${normalizedName} > ${attachFilename}`;
+                        const nestedParts = await processFile(attachBuffer, attachFilename, manifest, attachPath);
+                        parts.push(...nestedParts);
                     }
-                } catch (e) {
-                    console.error(`Failed to process attachment in ${normalizedName}`, e);
                 }
             }
+        } else if (filename.endsWith(".docx")) {
+            const result = await mammoth.extractRawText({ buffer: fileBuffer });
+            const text = `--- DOCUMENT: ${normalizedName} ---\n${result.value}`;
+            parts.push({
+                inlineData: {
+                    data: Buffer.from(text).toString("base64"),
+                    mimeType: "text/plain",
+                },
+            });
+        } else if (filename.endsWith(".xlsx") || filename.endsWith(".xls") || filename.endsWith(".csv")) {
+            const workbook = XLSX.read(fileBuffer, { type: "buffer" });
+            let text = `--- SPREADSHEET: ${normalizedName} ---\n`;
+            workbook.SheetNames.forEach((sheetName) => {
+                const sheet = workbook.Sheets[sheetName];
+                const csvData = XLSX.utils.sheet_to_csv(sheet);
+                text += `\nSheet: ${sheetName}\n${csvData}\n`;
+            });
+            parts.push({
+                inlineData: {
+                    data: Buffer.from(text).toString("base64"),
+                    mimeType: "text/plain",
+                },
+            });
+        } else if (mimeType.startsWith("image/") || mimeType === "application/pdf") {
+            parts.push({
+                inlineData: {
+                    data: fileBuffer.toString("base64"),
+                    mimeType: mimeType,
+                },
+            });
+        } else {
+            parts.push({
+                inlineData: {
+                    data: Buffer.from(`--- BINARY FILE: ${normalizedName} ---`).toString("base64"),
+                    mimeType: "text/plain",
+                },
+            });
         }
-    } else {
-        const text = buffer.toString("utf-8");
-        parts.push({
-            inlineData: {
-                data: Buffer.from(text).toString("base64"),
-                mimeType: "text/plain",
-            },
-        });
+    } catch (error) {
+        console.error(`Error processing ${normalizedName}:`, error);
     }
+
     return parts;
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
+    const blobsToDelete: string[] = [];
+
     try {
-        const formData = await req.formData();
+        const body = await request.json();
+        const { blobs } = body;
 
-        // Get files from the distinct sections
-        const filesPrior = formData.getAll("files_prior") as File[];
-        const filesT776 = formData.getAll("files_t776") as File[];
-        const filesCurrent = formData.getAll("files_current") as File[];
-
-        let totalSize = 0;
-        [...filesPrior, ...filesT776, ...filesCurrent].forEach(f => totalSize += f.size);
-        console.log(`Processing Request:
-      - Prior Files: ${filesPrior.length}
-      - T776 Files: ${filesT776.length}
-      - Current Files: ${filesCurrent.length}
-      - Total Size: ${(totalSize / 1024 / 1024).toFixed(2)} MB
-    `);
-
-        if (!filesCurrent || filesCurrent.length === 0) {
-            return NextResponse.json(
-                { error: "Current year files are required." },
-                { status: 400 }
-            );
+        if (!blobs || !Array.isArray(blobs)) {
+            return NextResponse.json({ error: "Invalid request: blobs array required" }, { status: 400 });
         }
 
-        const geminiParts = [];
+        const geminiParts: { inlineData: { data: string; mimeType: string } }[] = [];
         const manifest: string[] = [];
 
-        // Helper to inject section headers
-        const addSectionHeader = (header: string) => {
-            geminiParts.push({
-                inlineData: {
-                    data: Buffer.from(`\n\n=== ${header} ===\n\n`).toString("base64"),
-                    mimeType: "text/plain",
+        // Download and process files from blob URLs
+        for (const blobInfo of blobs) {
+            const { blobUrl, filename, section } = blobInfo;
+            blobsToDelete.push(blobUrl);
+
+            try {
+                const response = await fetch(blobUrl);
+                if (!response.ok) {
+                    console.error(`Failed to download blob: ${blobUrl}`);
+                    continue;
                 }
-            });
-        };
 
-        // 1. Process Prior Year Files (Context)
-        if (filesPrior.length > 0) {
-            addSectionHeader("SECTION: PRIOR YEAR FILES (SAMPLE)");
-            for (const file of filesPrior) {
-                const parts = await processFile(file, manifest, "PRIOR");
+                const arrayBuffer = await response.arrayBuffer();
+                const fileBuffer = Buffer.from(arrayBuffer);
+
+                // Add section header
+                if (section === "files_prior") {
+                    geminiParts.push({
+                        inlineData: {
+                            data: Buffer.from("--- SECTION: PRIOR YEAR FILES (Context Only) ---").toString("base64"),
+                            mimeType: "text/plain",
+                        },
+                    });
+                } else if (section === "files_t776") {
+                    geminiParts.push({
+                        inlineData: {
+                            data: Buffer.from("--- SECTION: PRIOR YEAR T776 (Template) ---").toString("base64"),
+                            mimeType: "text/plain",
+                        },
+                    });
+                } else if (section === "files_current") {
+                    geminiParts.push({
+                        inlineData: {
+                            data: Buffer.from("--- SECTION: CURRENT YEAR FILES ---").toString("base64"),
+                            mimeType: "text/plain",
+                        },
+                    });
+                }
+
+                const parts = await processFile(fileBuffer, filename, manifest, "");
                 geminiParts.push(...parts);
+            } catch (error) {
+                console.error(`Error processing blob ${filename}:`, error);
             }
         }
 
-        // 2. Process Prior Year T776 (Template)
-        if (filesT776.length > 0) {
-            addSectionHeader("SECTION: PRIOR YEAR T776 (TEMPLATE)");
-            for (const file of filesT776) {
-                const parts = await processFile(file, manifest, "TEMPLATE");
-                geminiParts.push(...parts);
-            }
-        }
-
-        // 3. Process Current Year Files (Target)
-        addSectionHeader("SECTION: CURRENT YEAR FILES (2024)");
-        for (const file of filesCurrent) {
-            const parts = await processFile(file, manifest, "");
-            geminiParts.push(...parts);
-        }
-
-        // Enhanced Prompt
+        // Enhanced Prompt (same as before)
         const prompt = `
       You are an expert tax assistant specializing in Canadian Personal Income Tax (T776).
       
@@ -278,25 +236,23 @@ export async function POST(req: NextRequest) {
       
       **Special Rules for Client Communication**:
       - **STAFF IDENTITY**: Anyone with @stevenchong.com or @johnwong.ca is STAFF.
-      - **CLIENT IDENTITY**: Match the names in the email chains against the **Taxpayer Name** on the "PRIOR YEAR T776". The draft email must be addressed TO this taxpayer.
-      - **IDENTIFYING MISSING INFO**: Compare Current Year items against the Prior Year categories. If a recurring expense is missing, list it in the "notes" and include a request in the email draft.
+      - **CLIENT IDENTITY**: Use the name found in the Prior Year T776. If the sender/recipient in Current Year emails does NOT match the Prior T776 name, flag it in the notes.
       
-      **OUTPUT**:
-      Provide a JSON object with this structure:
+      **OUTPUT FORMAT (STRICT JSON)**:
       {
-        "tax_year": number, 
+        "tax_year": number,
         "properties": [
           {
-            "address": "string (canonical address from Prior T776 if matched)",
-            "income": { 
-                "category_name": { "amount": number, "source_file": "string (FULL RELATIVE PATH including folder names)" } 
+            "address": "string (from Prior T776)",
+            "income": {
+              "category_name": { "amount": number, "source_file": "string (filename or Email.msg > Attachment)" }
             },
             "income_prior": { "category_name": number },
-            "expenses": { 
-                "category_name": { "amount": number, "source_file": "string (FULL RELATIVE PATH including folder names)" } 
+            "expenses": {
+              "category_name": { "amount": number, "source_file": "string" }
             },
             "expenses_prior": { "category_name": number },
-            "source_files_read": ["string (FULL PATHS of files read)"],
+            "source_files_read": ["string (all files you referenced for this property)"],
             "notes": "string (Identify missing info, or note if a new property was found not in Prior T776)"
           }
         ],
@@ -336,10 +292,30 @@ export async function POST(req: NextRequest) {
         // Overwrite Gemini's list with our reliable manifest from the recursive read
         data.all_files_detected = manifest;
 
+        // Clean up blobs
+        for (const blobUrl of blobsToDelete) {
+            try {
+                await del(blobUrl);
+                console.log(`Deleted blob: ${blobUrl}`);
+            } catch (error) {
+                console.error(`Failed to delete blob ${blobUrl}:`, error);
+            }
+        }
+
         return NextResponse.json({ data });
 
     } catch (error: any) {
         console.error("Analysis error:", error);
+
+        // Attempt cleanup even on error
+        for (const blobUrl of blobsToDelete) {
+            try {
+                await del(blobUrl);
+            } catch (e) {
+                console.error(`Cleanup failed for ${blobUrl}:`, e);
+            }
+        }
+
         return NextResponse.json(
             { error: error.message || "Internal Server Error" },
             { status: 500 }
