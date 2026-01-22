@@ -105,10 +105,10 @@ export default function Home() {
         if (!result) return;
         setIsExporting(true);
         try {
-            const zipData = await generateAuditPackage(result, [...filesCurrent, ...filesPrior, ...filesT776]);
-            const blob = new Blob([zipData as ArrayBuffer], { type: "application/zip" });
+            const blob = await generateAuditPackage(result, [...filesCurrent, ...filesPrior, ...filesT776]);
             const filename = `Rental_Tax_Package_${result.tax_year || 'Audit'}.zip`;
 
+            // Create a temporary hidden link
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.style.display = 'none';
@@ -118,11 +118,11 @@ export default function Home() {
             document.body.appendChild(a);
             a.click();
 
-            // Clean up with a delay to ensure the browser has started the download
+            // Keep the URL alive for a bit to ensure the browser captures it
             setTimeout(() => {
+                if (document.body.contains(a)) document.body.removeChild(a);
                 window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-            }, 500);
+            }, 30000);
         } catch (e) {
             console.error("ZIP Generation Error:", e);
             alert("Failed to generate Audit Package ZIP. Check console for details.");
@@ -235,18 +235,28 @@ export default function Home() {
                                 <h2 className="text-3xl font-black text-gray-900 tracking-tight">Tax Review Complete</h2>
                                 <p className="text-gray-500 mt-1 font-medium">Triangulated reporting from Historical, Benchmark, and Current sources.</p>
                             </div>
-                            <button
-                                onClick={handleDownloadPackage}
-                                disabled={isExporting}
-                                className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 hover:shadow-green-900/20 active:translate-y-0.5 transition-all disabled:opacity-50"
-                            >
-                                {isExporting ? (
-                                    <Loader2 className="w-5 h-5 mr-3 animate-spin" />
-                                ) : (
-                                    <Package className="w-5 h-5 mr-3" />
-                                )}
-                                Download Audit Package (.ZIP)
-                            </button>
+                            <div className="flex flex-col items-end gap-2">
+                                <button
+                                    onClick={handleDownloadPackage}
+                                    disabled={isExporting}
+                                    className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 hover:shadow-green-900/20 active:translate-y-0.5 transition-all disabled:opacity-50"
+                                >
+                                    {isExporting ? (
+                                        <>
+                                            <Loader2 className="w-5 h-5 mr-3 animate-spin" />
+                                            Generating ZIP...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Package className="w-5 h-5 mr-3" />
+                                            Download Audit Package (.ZIP)
+                                        </>
+                                    )}
+                                </button>
+                                <p className="text-[10px] text-gray-400 font-medium italic">
+                                    Includes Excel Summary + All Source Files
+                                </p>
+                            </div>
                         </div>
 
                         <div className="grid gap-8">

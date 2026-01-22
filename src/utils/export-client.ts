@@ -23,7 +23,7 @@ interface AnalysisResult {
     all_files_detected: string[];
 }
 
-export async function generateAuditPackage(result: AnalysisResult, originalFiles: File[]): Promise<ArrayBuffer> {
+export async function generateAuditPackage(result: AnalysisResult, originalFiles: File[]): Promise<Blob> {
     const zip = new JSZip();
     const sourceFolder = zip.folder("Source_Documents");
     if (!sourceFolder) throw new Error("Could not create ZIP folder");
@@ -225,10 +225,11 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
     const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
     zip.file("T776_Tax_Summary.xlsx", new Uint8Array(excelBuffer));
 
-    const zipData = await zip.generateAsync({
-        type: "arraybuffer",
+    const zipBlob = await zip.generateAsync({
+        type: "blob",
+        mimeType: "application/zip",
         compression: "DEFLATE",
-        compressionOptions: { level: 9 }
+        compressionOptions: { level: 6 } // Faster compression for large batches
     });
-    return zipData;
+    return zipBlob;
 }
