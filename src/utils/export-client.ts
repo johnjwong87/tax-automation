@@ -23,7 +23,7 @@ interface AnalysisResult {
     all_files_detected: string[];
 }
 
-export async function generateAuditPackage(result: AnalysisResult, originalFiles: File[]) {
+export async function generateAuditPackage(result: AnalysisResult, originalFiles: File[]): Promise<ArrayBuffer> {
     const zip = new JSZip();
     const sourceFolder = zip.folder("Source_Documents");
     if (!sourceFolder) throw new Error("Could not create ZIP folder");
@@ -33,12 +33,9 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
     // 1. Add Original Files to the ZIP
     for (const file of originalFiles) {
         const buffer = await file.arrayBuffer();
-        // Use webkitRelativePath if available to maintain folder structure
         const zipPath = file.webkitRelativePath || file.name;
         sourceFolder.file(zipPath, buffer);
 
-        // If it's an MSG, also extract and add its internal attachments 
-        // We add them to a subfolder named after the MSG file to avoid collisions
         if (file.name.toLowerCase().endsWith(".msg")) {
             try {
                 const reader = new MsgReader(buffer);
@@ -46,9 +43,9 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
                 if (data.attachments) {
                     const msgFolderName = `${file.webkitRelativePath || file.name}_attachments`;
                     for (const attach of data.attachments) {
-                        const attachData = reader.getAttachment(attach);
-                        if (attachData) {
-                            sourceFolder.file(`${msgFolderName}/${attachData.fileName}`, attachData.content);
+                        const attachmentData = reader.getAttachment(attach);
+                        if (attachmentData) {
+                            sourceFolder.file(`${msgFolderName}/${attachmentData.fileName}`, attachmentData.content);
                         }
                     }
                 }
@@ -71,7 +68,6 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
         rows.push(["PROPERTY SUMMARY", prop.address || "Unknown"]);
         rows.push([""]);
 
-        // Merge Categories
         const incomeCats = Array.from(new Set([
             ...Object.keys(prop.income || {}),
             ...Object.keys(prop.income_prior || {})
@@ -127,28 +123,20 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
             rows.push(["NOTES / MISSING INFO"]);
             rows.push([prop.notes]);
         }
-        // Add File Manifest
         rows.push([""]);
         rows.push(["FILES PROCESSED FOR THIS PROPERTY"]);
         (prop.source_files_read || []).forEach(f => rows.push([f]));
 
         const worksheet = XLSX.utils.aoa_to_sheet(rows);
-
-        // --- Post-process worksheet for Formulas and Formatting ---
         const fmt = '#,##0.00';
-
-        // Helper to get cell reference
         const getRef = (c: number, r: number) => XLSX.utils.encode_cell({ c, r });
 
-        // Iterate through rows to apply formats and find ranges for formulas
         let incomeStart = -1, incomeEnd = -1, totalIncomeRow = -1;
         let expenseStart = -1, expenseEnd = -1, totalExpenseRow = -1;
         let netIncomeRow = -1;
 
         rows.forEach((r, rIdx) => {
             const firstCell = r[0];
-
-            // 1. Identify Sections
             if (firstCell === "INCOME") {
                 incomeStart = rIdx + 1;
             } else if (firstCell === "TOTAL INCOME") {
@@ -163,7 +151,6 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
                 netIncomeRow = rIdx;
             }
 
-            // 2. Apply Number Formatting to Columns B, C, D (Indices 1, 2, 3)
             [1, 2, 3].forEach(cIdx => {
                 const cell = worksheet[getRef(cIdx, rIdx)];
                 if (cell && typeof cell.v === 'number') {
@@ -171,7 +158,6 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
                 }
             });
 
-            // 3. Add Variance Formulas (Column D = Column C - Column B) for individual items
             if (rIdx > 0 && r[0] && !["INCOME", "EXPENSES", "TOTAL INCOME", "TOTAL EXPENSES", "NET RENTAL INCOME", ""].includes(String(r[0])) && !String(r[0]).startsWith("NOTES") && !String(r[0]).startsWith("FILES")) {
                 const cellD = worksheet[getRef(3, rIdx)];
                 if (cellD) {
@@ -180,41 +166,28 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
             }
         });
 
-        // 4. Add Section Total Formulas
         if (incomeStart !== -1 && incomeEnd >= incomeStart) {
-            // Total Income Column B
             worksheet[getRef(1, totalIncomeRow)] = { f: `SUM(${getRef(1, incomeStart)}:${getRef(1, incomeEnd)})`, z: fmt };
-            // Total Income Column C
             worksheet[getRef(2, totalIncomeRow)] = { f: `SUM(${getRef(2, incomeStart)}:${getRef(2, incomeEnd)})`, z: fmt };
-            // Total Income Variance
             worksheet[getRef(3, totalIncomeRow)] = { f: `${getRef(2, totalIncomeRow)}-${getRef(1, totalIncomeRow)}`, z: fmt };
         }
 
         if (expenseStart !== -1 && expenseEnd >= expenseStart) {
-            // Total Expenses Column B
             worksheet[getRef(1, totalExpenseRow)] = { f: `SUM(${getRef(1, expenseStart)}:${getRef(1, expenseEnd)})`, z: fmt };
-            // Total Expenses Column C
             worksheet[getRef(2, totalExpenseRow)] = { f: `SUM(${getRef(2, expenseStart)}:${getRef(2, expenseEnd)})`, z: fmt };
-            // Total Expenses Variance
             worksheet[getRef(3, totalExpenseRow)] = { f: `${getRef(2, totalExpenseRow)}-${getRef(1, totalExpenseRow)}`, z: fmt };
         }
 
-        // 5. Add Net Income Formulas
         if (netIncomeRow !== -1 && totalIncomeRow !== -1 && totalExpenseRow !== -1) {
             worksheet[getRef(1, netIncomeRow)] = { f: `${getRef(1, totalIncomeRow)}-${getRef(1, totalExpenseRow)}`, z: fmt };
             worksheet[getRef(2, netIncomeRow)] = { f: `${getRef(2, totalIncomeRow)}-${getRef(2, totalExpenseRow)}`, z: fmt };
             worksheet[getRef(3, netIncomeRow)] = { f: `${getRef(2, netIncomeRow)}-${getRef(1, netIncomeRow)}`, z: fmt };
         }
 
-        // Add Hyperlinks to the Source File column (index 4)
         rows.forEach((r, rIdx) => {
             let sourceFile = r[4];
             if (sourceFile && rIdx > 0 && (r[0] !== "INCOME" && r[0] !== "EXPENSES" && !r[0].startsWith("TOTAL"))) {
-                // Sanitize: Gemini uses " > " for breadcrumbs (e.g. "Folder/Email.msg > Attachment.pdf")
-                // Standardize to match our ZIP folder structure exactly: "Folder/Email.msg_attachments/Attachment.pdf"
-                // Using forward slashes which are often more reliable in the underlying XLSX hyperlink XML
                 const sanitizedPath = sourceFile.replace(/ > /g, "_attachments/").replace(/\\/g, "/");
-
                 const cellRef = XLSX.utils.encode_cell({ c: 4, r: rIdx });
                 worksheet[cellRef].l = {
                     Target: `Source_Documents/${sanitizedPath}`,
@@ -226,20 +199,15 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
         XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
     });
 
-    // 3. Process the entire Manifest (all files read across all properties)
     const manifestRows = [["FULL AUDIT TRAIL - ALL FILES PROCESSED"], [""]];
     result.all_files_detected?.forEach(f => manifestRows.push([f]));
 
-    // --- Identify Unused Files ---
-    // Get all files cited in any property (income or expenses)
     const citedFiles = new Set<string>();
     result.properties.forEach(prop => {
         Object.values(prop.income || {}).forEach(m => { if (m.source_file) citedFiles.add(m.source_file); });
         Object.values(prop.expenses || {}).forEach(m => { if (m.source_file) citedFiles.add(m.source_file); });
     });
 
-    // Files in all_files_detected but not in citedFiles
-    // We also ignore PRIOR and TEMPLATE files since they are reference documents
     const unusedFiles = (result.all_files_detected || []).filter(f => {
         const isReference = f.startsWith("PRIOR") || f.startsWith("TEMPLATE");
         return !isReference && !citedFiles.has(f);
@@ -247,20 +215,20 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
 
     if (unusedFiles.length > 0) {
         manifestRows.push([""]);
-        manifestRows.push(["UNUSED FILES (FOR REVIEW) - Files uploaded but not used in summary"]);
-        manifestRows.push(["The following current year documents were detected but no income/expenses were extracted from them:"]);
+        manifestRows.push(["UNUSED FILES (FOR REVIEW)"]);
         unusedFiles.forEach(f => manifestRows.push([f]));
-    } else {
-        manifestRows.push([""]);
-        manifestRows.push(["All current year documents were successfully used in the summary."]);
     }
 
     const manifestSheet = XLSX.utils.aoa_to_sheet(manifestRows);
     XLSX.utils.book_append_sheet(workbook, manifestSheet, "Audit Trail");
 
     const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-    zip.file("T776_Tax_Summary.xlsx", excelBuffer);
+    zip.file("T776_Tax_Summary.xlsx", new Uint8Array(excelBuffer));
 
-    const zipBlob = await zip.generateAsync({ type: "blob" });
-    return zipBlob;
+    const zipData = await zip.generateAsync({
+        type: "arraybuffer",
+        compression: "DEFLATE",
+        compressionOptions: { level: 9 }
+    });
+    return zipData;
 }

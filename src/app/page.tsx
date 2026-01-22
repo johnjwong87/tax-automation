@@ -105,15 +105,27 @@ export default function Home() {
         if (!result) return;
         setIsExporting(true);
         try {
-            const blob = await generateAuditPackage(result, [...filesCurrent, ...filesPrior, ...filesT776]);
+            const zipData = await generateAuditPackage(result, [...filesCurrent, ...filesPrior, ...filesT776]);
+            const blob = new Blob([zipData as ArrayBuffer], { type: "application/zip" });
+            const filename = `Rental_Tax_Package_${result.tax_year || 'Audit'}.zip`;
+
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement("a");
+            a.style.display = 'none';
             a.href = url;
-            a.download = `Rental_Tax_Package_${result.tax_year || 'Audit'}.zip`;
+            a.download = filename;
+
+            document.body.appendChild(a);
             a.click();
+
+            // Clean up with a delay to ensure the browser has started the download
+            setTimeout(() => {
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            }, 500);
         } catch (e) {
-            console.error(e);
-            alert("Failed to generate Audit Package ZIP");
+            console.error("ZIP Generation Error:", e);
+            alert("Failed to generate Audit Package ZIP. Check console for details.");
         } finally {
             setIsExporting(false);
         }
@@ -123,6 +135,7 @@ export default function Home() {
 
     return (
         <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
+            <title>TaxFlow Rental Automation</title>
             <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
                     <div className="flex items-center gap-2">
