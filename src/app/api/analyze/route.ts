@@ -252,7 +252,11 @@ export async function POST(request: NextRequest) {
 
       2. SMART CLIENT EMAIL:
       - Draft clarifications. Never ask a question you can answer yourself. Connect the dots.
-      - EXAMPLE GOOD: "Last year, we claimed $1,200 for insurance. Your current spreadsheet lists $0. Did you pay the insurance policy this year, or was it perhaps missed in the upload?"
+      - **FORMATTING RULE:** Use a numbered list (1., 2., 3.) with double spacing between items.
+      - EXAMPLE GOOD:
+        "1. Last year, we claimed $1,200 for insurance. Your current spreadsheet lists $0. Did you pay the insurance policy this year, or was it perhaps missed in the upload?
+
+        2. The lease on file shows rent of $4,000/mo. Your totals show $40,000. Were there 2 months of vacancy?"
 
       # OUTPUT FORMAT (STRICT JSON):
       {
