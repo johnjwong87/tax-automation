@@ -114,14 +114,39 @@ export default function Home() {
         });
     };
 
-    // Helper: Trigger download from Data URL
-    const triggerDownload = (dataUrl: string, filename: string) => {
+    // Robust download function that tries multiple methods
+    const forceDownload = async (blob: Blob, filename: string) => {
+        console.log("Attempting download:", filename, "Size:", blob.size);
+
+        // Method 1: Use blob URL with proper MIME type hint in filename
+        const blobUrl = URL.createObjectURL(blob);
+
+        // Method 2: Try direct anchor with blob URL first
         const a = document.createElement("a");
-        a.href = dataUrl;
+        a.style.display = "none";
+        a.href = blobUrl;
         a.download = filename;
+        a.setAttribute("target", "_blank"); // Sometimes helps
         document.body.appendChild(a);
         a.click();
-        document.body.removeChild(a);
+
+        // Small delay then also try window.open as backup
+        setTimeout(() => {
+            // Method 3: Open in new window - forces browser to handle the file
+            const newWindow = window.open(blobUrl, "_blank");
+            if (newWindow) {
+                // If window opened, the browser will prompt to download or display
+                console.log("Opened in new window");
+            }
+        }, 500);
+
+        // Cleanup
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(blobUrl);
+        }, 5000);
+
+        return blobUrl;
     };
 
     const handleGeneratePackage = async () => {
@@ -132,13 +157,10 @@ export default function Home() {
             const blob = await generateAuditPackage(result, [...filesCurrent, ...filesPrior, ...filesT776]);
             console.log("ZIP generated:", blob.size, "bytes, type:", blob.type);
 
-            // Convert to Data URL and trigger download
-            const dataUrl = await blobToDataUrl(blob);
+            // Use robust multi-method download
             const filename = `Rental_Tax_Package_${result.tax_year || 'Audit'}.zip`;
-            triggerDownload(dataUrl, filename);
-
-            // Also store for manual retry
-            setZipUrl(dataUrl);
+            const blobUrl = await forceDownload(blob, filename);
+            setZipUrl(blobUrl);
         } catch (e) {
             console.error("ZIP Error:", e);
             alert("Failed to build ZIP package: " + (e instanceof Error ? e.message : "Unknown error"));
@@ -155,13 +177,10 @@ export default function Home() {
             const blob = await generateExcelSummary(result);
             console.log("Excel generated:", blob.size, "bytes, type:", blob.type);
 
-            // Convert to Data URL and trigger download
-            const dataUrl = await blobToDataUrl(blob);
+            // Use robust multi-method download
             const filename = `Rental_Tax_Summary_${result.tax_year || 'Audit'}.xlsx`;
-            triggerDownload(dataUrl, filename);
-
-            // Also store for manual retry
-            setExcelUrl(dataUrl);
+            const blobUrl = await forceDownload(blob, filename);
+            setExcelUrl(blobUrl);
         } catch (e) {
             console.error("Excel Error:", e);
             alert("Failed to build Excel summary: " + (e instanceof Error ? e.message : "Unknown error"));
@@ -186,7 +205,7 @@ export default function Home() {
                             TaxFlow <span className="text-blue-600 underline decoration-blue-200 underline-offset-4">Rental</span>
                         </span>
                         <span className="ml-3 px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-black rounded-md border border-blue-200 uppercase tracking-widest">
-                            v2.0 Senior CPA
+                            v3.0 Gemini Flash
                         </span>
                     </div>
                 </div>
@@ -275,72 +294,18 @@ export default function Home() {
                                 <h2 className="text-3xl font-black text-gray-900 tracking-tight">Tax Review Complete</h2>
                                 <p className="text-gray-500 mt-1 font-medium">Triangulated reporting from Historical, Benchmark, and Current sources.</p>
                             </div>
-                            <div className="flex flex-col items-end gap-3">
-                                <div className="flex gap-4">
-                                    <button
-                                        onClick={handleGenerateExcel}
-                                        disabled={isExporting}
-                                        className="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 active:translate-y-0.5 transition-all disabled:opacity-50"
-                                    >
-                                        {isGeneratingExcel ? (
-                                            <Loader2 className="w-5 h-5 mr-3 animate-spin" />
-                                        ) : (
-                                            <FileSpreadsheet className="w-5 h-5 mr-3" />
-                                        )}
-                                        Build Summary Only (.XLSX)
-                                    </button>
-                                    <button
-                                        onClick={handleGeneratePackage}
-                                        disabled={isExporting}
-                                        className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 active:translate-y-0.5 transition-all disabled:opacity-50"
-                                    >
-                                        {isGeneratingZip ? (
-                                            <Loader2 className="w-5 h-5 mr-3 animate-spin" />
-                                        ) : (
-                                            <Package className="w-5 h-5 mr-3" />
-                                        )}
-                                        Build Full ZIP Package
-                                    </button>
-                                </div>
-
-                                {(zipUrl || excelUrl) && (
-                                    <div className="bg-yellow-50 border-2 border-yellow-200 p-4 rounded-2xl space-y-3 w-full animate-in zoom-in duration-300 shadow-inner">
-                                        <h4 className="text-yellow-800 font-black text-sm uppercase tracking-wider text-center">
-                                            📥 Download Zone
-                                        </h4>
-                                        <div className="flex flex-col gap-2">
-                                            {excelUrl && (
-                                                <a
-                                                    href={excelUrl}
-                                                    download={`Rental_Tax_Summary_${result.tax_year || 'Audit'}.xlsx`}
-                                                    className="w-full py-2 bg-white border-2 border-blue-400 text-blue-700 rounded-lg text-xs font-black text-center shadow-sm hover:bg-blue-50 transition-colors flex items-center justify-center gap-2"
-                                                >
-                                                    <FileSpreadsheet className="w-3 h-3" />
-                                                    CLICK TO SAVE EXCEL SUMMARY
-                                                </a>
-                                            )}
-                                            {zipUrl && (
-                                                <a
-                                                    href={zipUrl}
-                                                    download={`Rental_Tax_Package_${result.tax_year || 'Audit'}.zip`}
-                                                    className="w-full py-2 bg-white border-2 border-green-400 text-green-700 rounded-lg text-xs font-black text-center shadow-sm hover:bg-green-50 transition-colors flex items-center justify-center gap-2"
-                                                >
-                                                    <Package className="w-3 h-3" />
-                                                    CLICK TO SAVE FULL ZIP
-                                                </a>
-                                            )}
-                                        </div>
-                                        <div className="pt-2 border-t border-yellow-200">
-                                            <p className="text-[10px] text-yellow-700 leading-tight text-center">
-                                                <strong>TIP:</strong> If the file has a name like <em>"e6ce5b3b..."</em> after downloading, simply <strong>Rename it</strong> to add <strong>.xlsx</strong> or <strong>.zip</strong> to the end.
-                                            </p>
-                                        </div>
-                                    </div>
+                            <button
+                                onClick={handleGeneratePackage}
+                                disabled={isGeneratingZip}
+                                className="inline-flex items-center px-8 py-4 bg-green-600 text-white font-bold text-lg rounded-xl shadow-lg hover:bg-green-700 active:translate-y-0.5 transition-all disabled:opacity-50"
+                            >
+                                {isGeneratingZip ? (
+                                    <Loader2 className="w-6 h-6 mr-3 animate-spin" />
+                                ) : (
+                                    <Package className="w-6 h-6 mr-3" />
                                 )}
-                                <p className="text-[10px] text-gray-400 font-medium italic">
-                                    Package includes Excel Summary + All Original Receipts
-                                </p>
-                            </div>
+                                Download Analysis (.ZIP)
+                            </button>
                         </div>
 
                         <div className="grid gap-8">
@@ -407,46 +372,49 @@ export default function Home() {
                             ))}
                         </div>
 
-                        {result.email_draft && (
-                            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden mt-10">
-                                <div className="bg-indigo-600 px-8 py-5">
-                                    <h3 className="text-lg font-bold text-white uppercase tracking-wider flex items-center">
-                                        <Loader2 className="w-5 h-5 mr-3 opacity-50" />
-                                        Generated Client Inquiry Draft
-                                    </h3>
-                                </div>
-                                <div className="p-8">
-                                    <textarea
-                                        className="w-full h-80 p-6 bg-gray-50 border border-gray-200 rounded-2xl font-mono text-sm leading-relaxed focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-none"
-                                        readOnly
-                                        value={result.email_draft}
-                                    />
-                                    <div className="mt-4 flex justify-between items-center">
-                                        <p className="text-xs text-gray-500 uppercase font-black tracking-widest">Client Communication Block</p>
-                                        <button
-                                            onClick={() => {
-                                                navigator.clipboard.writeText(result.email_draft || "");
-                                                alert("Copied to clipboard!");
-                                            }}
-                                            className="text-indigo-600 font-bold text-xs hover:underline"
-                                        >
-                                            COPY TO CLIPBOARD
-                                        </button>
+                        {
+                            result.email_draft && (
+                                <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden mt-10">
+                                    <div className="bg-indigo-600 px-8 py-5">
+                                        <h3 className="text-lg font-bold text-white uppercase tracking-wider flex items-center">
+                                            <Loader2 className="w-5 h-5 mr-3 opacity-50" />
+                                            Generated Client Inquiry Draft
+                                        </h3>
+                                    </div>
+                                    <div className="p-8">
+                                        <textarea
+                                            className="w-full h-80 p-6 bg-gray-50 border border-gray-200 rounded-2xl font-mono text-sm leading-relaxed focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-none"
+                                            readOnly
+                                            value={result.email_draft}
+                                        />
+                                        <div className="mt-4 flex justify-between items-center">
+                                            <p className="text-xs text-gray-500 uppercase font-black tracking-widest">Client Communication Block</p>
+                                            <button
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(result.email_draft || "");
+                                                    alert("Copied to clipboard!");
+                                                }}
+                                                className="text-indigo-600 font-bold text-xs hover:underline"
+                                            >
+                                                COPY TO CLIPBOARD
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </main>
+                            )
+                        }
+                    </div >
+                )
+                }
+            </main >
 
             <footer className="py-10 border-t border-gray-200 bg-white">
                 <div className="max-w-7xl mx-auto px-4 text-center">
                     <p className="text-xs text-gray-400 font-bold uppercase tracking-[0.2em]">
-                        Verified Audit Trail &bull; Gemini 2.0 Flash &bull; Unlimited File Uploads via Blob Storage
+                        Verified Audit Trail &bull; Gemini 3.0 Flash &bull; Unlimited File Uploads via Blob Storage
                     </p>
                 </div>
             </footer>
-        </div>
+        </div >
     );
 }
