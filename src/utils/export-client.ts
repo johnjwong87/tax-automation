@@ -227,9 +227,9 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
 
     const zipBlob = await zip.generateAsync({
         type: "blob",
-        mimeType: "application/zip",
+        mimeType: "application/octet-stream",
         compression: "DEFLATE",
-        compressionOptions: { level: 6 } // Faster compression for large batches
+        compressionOptions: { level: 6 }
     });
     return zipBlob;
 }

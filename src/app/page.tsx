@@ -39,6 +39,8 @@ export default function Home() {
     const [uploadProgress, setUploadProgress] = useState("");
     const [result, setResult] = useState<AnalysisResult | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+    const [downloadFilename, setDownloadFilename] = useState<string>("");
 
     const handleAnalyze = async () => {
         if (filesCurrent.length === 0) return;
@@ -104,28 +106,37 @@ export default function Home() {
     const handleDownloadPackage = async () => {
         if (!result) return;
         setIsExporting(true);
+        setDownloadUrl(null); // Reset previous
         try {
             const blob = await generateAuditPackage(result, [...filesCurrent, ...filesPrior, ...filesT776]);
-            const filename = `Rental_Tax_Package_${result.tax_year || 'Audit'}.zip`;
+            const finalFilename = `Rental_Tax_Audit_${result.tax_year || 'Summary'}.zip`;
 
-            // Create a temporary hidden link
             const url = window.URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.style.display = 'none';
-            a.href = url;
-            a.download = filename;
+            setDownloadUrl(url);
+            setDownloadFilename(finalFilename);
 
-            document.body.appendChild(a);
-            a.click();
+            // Automatic trigger (Nuclear version)
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = finalFilename;
+            link.style.display = 'none';
+            document.body.appendChild(link);
 
-            // Keep the URL alive for a bit to ensure the browser captures it
+            // Dispatch native click
+            const clickEvt = new MouseEvent('click', {
+                view: window,
+                bubbles: true,
+                cancelable: true
+            });
+            link.dispatchEvent(clickEvt);
+
+            // Keep link on DOM for cleanup
             setTimeout(() => {
-                if (document.body.contains(a)) document.body.removeChild(a);
-                window.URL.revokeObjectURL(url);
-            }, 30000);
+                if (document.body.contains(link)) document.body.removeChild(link);
+            }, 60000);
         } catch (e) {
             console.error("ZIP Generation Error:", e);
-            alert("Failed to generate Audit Package ZIP. Check console for details.");
+            alert("Failed to generate ZIP. Check browser console.");
         } finally {
             setIsExporting(false);
         }
@@ -256,6 +267,18 @@ export default function Home() {
                                 <p className="text-[10px] text-gray-400 font-medium italic">
                                     Includes Excel Summary + All Source Files
                                 </p>
+                                {downloadUrl && (
+                                    <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-center animate-in fade-in zoom-in duration-300">
+                                        <p className="text-[11px] text-yellow-800 font-bold mb-1">Download not starting?</p>
+                                        <a
+                                            href={downloadUrl}
+                                            download={downloadFilename}
+                                            className="text-sm text-blue-600 font-black underline hover:text-blue-800"
+                                        >
+                                            Click here for Manual Download
+                                        </a>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
