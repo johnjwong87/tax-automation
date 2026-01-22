@@ -4,6 +4,7 @@ import { useState } from "react";
 import { FileUpload } from "@/components/file-upload";
 import { Loader2, FileSpreadsheet, Package, Upload } from "lucide-react";
 import { generateAuditPackage } from "@/utils/export-client";
+import { upload } from "@vercel/blob/client";
 
 interface SourceMapping {
     amount: number;
@@ -49,37 +50,14 @@ export default function Home() {
         setUploadProgress("Uploading files to secure storage...");
 
         try {
-            // Step 1: Upload files to Blob Storage
-            const formData = new FormData();
-            filesPrior.forEach(f => {
-                formData.append("files_prior", f, f.webkitRelativePath || f.name);
-            });
-            filesT776.forEach(f => {
-                formData.append("files_t776", f, f.webkitRelativePath || f.name);
-            });
-            filesCurrent.forEach(f => {
-                formData.append("files_current", f, f.webkitRelativePath || f.name);
-            });
+            // Step 1: Direct Upload files to Blob Storage (Bypasses 4.5MB limit)
+            const blobPromises = [
+                ...filesPrior.map(f => upload(f.name, f, { access: 'public', handleUploadUrl: '/api/upload' }).then((b: any) => ({ blobUrl: b.url, filename: f.name, section: 'files_prior' }))),
+                ...filesT776.map(f => upload(f.name, f, { access: 'public', handleUploadUrl: '/api/upload' }).then((b: any) => ({ blobUrl: b.url, filename: f.name, section: 'files_t776' }))),
+                ...filesCurrent.map(f => upload(f.name, f, { access: 'public', handleUploadUrl: '/api/upload' }).then((b: any) => ({ blobUrl: b.url, filename: f.name, section: 'files_current' }))),
+            ];
 
-            const uploadResponse = await fetch("/api/upload", {
-                method: "POST",
-                body: formData,
-            });
-
-            if (!uploadResponse.ok) {
-                const text = await uploadResponse.text();
-                let errMsg = "Upload failed";
-                try {
-                    const errData = JSON.parse(text);
-                    errMsg = errData.error || errMsg;
-                } catch {
-                    if (text.length < 200) errMsg = text;
-                }
-                throw new Error(errMsg);
-            }
-
-            const uploadData = await uploadResponse.json();
-            const { blobs } = uploadData;
+            const blobs = await Promise.all(blobPromises);
 
             setIsUploading(false);
             setIsAnalyzing(true);

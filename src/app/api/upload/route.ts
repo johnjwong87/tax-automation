@@ -1,40 +1,44 @@
-import { NextRequest, NextResponse } from "next/server";
-import { put } from "@vercel/blob";
+import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
+import { NextResponse } from 'next/server';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request): Promise<NextResponse> {
+    const body = (await request.json()) as HandleUploadBody;
+
     try {
-        const formData = await request.formData();
-        const uploadedBlobs: { blobUrl: string; filename: string; section: string }[] = [];
+        const jsonResponse = await handleUpload({
+            body,
+            request,
+            onBeforeGenerateToken: async () => {
+                return {
+                    allowedContentTypes: [
+                        'application/pdf',
+                        'image/jpeg',
+                        'image/png',
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                        'application/vnd.ms-outlook',
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        'text/csv',
+                        'application/octet-stream'
+                    ],
+                    tokenPayload: JSON.stringify({
+                        // Any specific metadata you want to pass
+                    }),
+                };
+            },
+            onUploadCompleted: async ({ blob, tokenPayload }) => {
+                // This is called after the file is uploaded to Vercel
+                console.log('blob upload completed', blob, tokenPayload);
+            },
+        });
 
-        // Process each file and upload to Blob Storage
-        for (const [key, value] of formData.entries()) {
-            if (value instanceof File) {
-                const file = value as File;
-                const section = key; // 'files_prior', 'files_t776', or 'files_current'
-
-                // Upload to Vercel Blob with a unique path
-                const blob = await put(file.name, file, {
-                    access: 'public', // Temporary public access for processing
-                    addRandomSuffix: true, // Prevents filename collisions
-                });
-
-                uploadedBlobs.push({
-                    blobUrl: blob.url,
-                    filename: file.name,
-                    section: section,
-                });
-            }
-        }
-
-        return NextResponse.json({ blobs: uploadedBlobs });
-    } catch (error: any) {
-        console.error("Upload error:", error);
+        return NextResponse.json(jsonResponse);
+    } catch (error) {
         return NextResponse.json(
-            { error: error.message || "Upload failed" },
-            { status: 500 }
+            { error: (error as Error).message },
+            { status: 400 },
         );
     }
 }
