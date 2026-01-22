@@ -104,18 +104,44 @@ export default function Home() {
         }
     };
 
+    // Helper: Convert Blob to Data URL
+    const blobToDataUrl = (blob: Blob): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    };
+
+    // Helper: Trigger download from Data URL
+    const triggerDownload = (dataUrl: string, filename: string) => {
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
     const handleGeneratePackage = async () => {
         if (!result) return;
         setIsGeneratingZip(true);
         setZipUrl(null);
         try {
             const blob = await generateAuditPackage(result, [...filesCurrent, ...filesPrior, ...filesT776]);
-            const url = window.URL.createObjectURL(blob);
-            setZipUrl(url);
-            console.log("Package generated successfully:", blob.size, "bytes");
+            console.log("ZIP generated:", blob.size, "bytes, type:", blob.type);
+
+            // Convert to Data URL and trigger download
+            const dataUrl = await blobToDataUrl(blob);
+            const filename = `Rental_Tax_Package_${result.tax_year || 'Audit'}.zip`;
+            triggerDownload(dataUrl, filename);
+
+            // Also store for manual retry
+            setZipUrl(dataUrl);
         } catch (e) {
             console.error("ZIP Error:", e);
-            alert("Failed to build ZIP package.");
+            alert("Failed to build ZIP package: " + (e instanceof Error ? e.message : "Unknown error"));
         } finally {
             setIsGeneratingZip(false);
         }
@@ -127,12 +153,18 @@ export default function Home() {
         setExcelUrl(null);
         try {
             const blob = await generateExcelSummary(result);
-            const url = window.URL.createObjectURL(blob);
-            setExcelUrl(url);
-            console.log("Excel generated successfully:", blob.size, "bytes");
+            console.log("Excel generated:", blob.size, "bytes, type:", blob.type);
+
+            // Convert to Data URL and trigger download
+            const dataUrl = await blobToDataUrl(blob);
+            const filename = `Rental_Tax_Summary_${result.tax_year || 'Audit'}.xlsx`;
+            triggerDownload(dataUrl, filename);
+
+            // Also store for manual retry
+            setExcelUrl(dataUrl);
         } catch (e) {
             console.error("Excel Error:", e);
-            alert("Failed to build Excel summary.");
+            alert("Failed to build Excel summary: " + (e instanceof Error ? e.message : "Unknown error"));
         } finally {
             setIsGeneratingExcel(false);
         }
