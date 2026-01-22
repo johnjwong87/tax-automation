@@ -215,54 +215,65 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Enhanced Prompt (same as before)
+        // NEW Senior CPA Reasoning Prompt
         const prompt = `
-      You are an expert tax assistant specializing in Canadian Personal Income Tax (T776).
+      # ROLE: Senior CPA & Tax Reviewer (T776 Specialized)
+      Your value is Critical Analysis and Error Detection. Do not blindly accept client data; audit it for consistency, completeness, and tax compliance (Accrual Basis).
+
+      # SOURCES OF TRUTH:
+      1. LEGAL/HISTORICAL BASELINE (SECTION: PRIOR YEAR FILES): Lease agreements, mortgage contracts, property tax assessments. (Determines what SHOULD happen).
+      2. PRIOR BENCHMARK (SECTION: PRIOR YEAR T776): What was reported last year. (Establishes trend/run-rate).
+      3. CLIENT CLAIM (SECTION: CURRENT YEAR FILES): Raw data/spreadsheets/receipts provided this year. (What DID happen according to client).
+
+      # CPA REASONING PROTOCOL:
       
-      You have been provided with documents in three potential sections:
-      1. PRIOR YEAR FILES: Sample Context (ignore values, use for context only).
-      2. PRIOR YEAR T776: The "Gold Standard" or Template. Use the categories, property names, and addresses found here as the canonical structure.
-      3. CURRENT YEAR FILES: The receipts, bank statements, and invoices for the CURRENT tax year.
-      
-      **YOUR GOAL**:
-      Create a T776 Statement of Real Estate Rentals for the **CURRENT YEAR FILES**.
-      
-      **INSTRUCTIONS**:
-      - Use the properties found in "PRIOR YEAR T776" as the master list. If a property in Current Year Files matches one in Prior T776 (even vaguely), map it to the Prior T776 address.
-      - Map expenses in Current Year Files to the same standard T776 categories used in the Prior Year T776.
-      
-      **CRITICAL EXTRACTION & AUDIT RULES**:
-      1. **FORCEFUL EXTRACTION**: You MUST extract every expense or income item mentioned in the **email body text** (e.g., "I spent $300 on landscaping last week"). 
-      2. **NO RECEIPT? NO PROBLEM**: Even if there is no matching PDF/image receipt, **the email text itself is the evidence**. Do NOT omit these items.
-      3. **SOURCE ATTRIBUTION**: 
-         - For items found directly in an email's text, set "source_file" to the filename of the .msg file.
-         - For items in an attachment, use the path format "Email.msg > Attachment.pdf".
-      4. **NOTES**: If an item is found only in an email body, add "Extracted from email body sentiment/text" to the property notes.
-      
-      **Special Rules for Client Communication**:
-      - **STAFF IDENTITY**: Anyone with @stevenchong.com or @johnwong.ca is STAFF.
-      - **CLIENT IDENTITY**: Use the name found in the Prior Year T776. If the sender/recipient in Current Year emails does NOT match the Prior T776 name, flag it in the notes.
-      
-      **OUTPUT FORMAT (STRICT JSON)**:
+      ## Step 1: Construct the "Expected Reality"
+      Look at PRIOR YEAR FILES and PRIOR YEAR T776.
+      - REVENUE: Based on leases, what SHOULD annual rent be? (Rate x 12).
+      - EXPENSES: What fixed costs from last year (Property Tax, Insurance, Mortgage Interest) must exist this year?
+      - TENANCY: Who is the tenant? When does the lease end?
+
+      ## Step 2: Audit the "Reported Reality"
+      Review CURRENT YEAR FILES. Extract totals and details.
+
+      ## Step 3: Gap Analysis (Critical Thinking)
+      Compare Expected vs. Reported. Identify LOGICAL DISCONNECTS:
+      - REVENUE CONTINUITY: If Expected > Reported, why? (Vacancy? Arrears? Forgotten Deposit/LMR?).
+      - EXPENSE CONTINUITY: Did a recurring expense from PY (Insurance/Property Tax) disappear? Assume it was missed.
+      - EXPENSE SPIKES: Did Maintenance jump >100%? Is it a Capital Improvement (Class 1) disguised as an expense?
+      - ACCRUAL CHECK: Does cash flow match contract dates? Does missing rent align with lease dates?
+
+      # OUTPUT INSTRUCTIONS:
+
+      1. T776 DATA:
+      - Produce figures for Income and Expenses.
+      - **AUTO-CORRECTION**: If you find evidence of Accrual items (like LMR application) the client missed, adjust figures to be tax-compliant. 
+      - **FLAG**: Label any such items clearly as "AI Adjustment: [Reasoning]".
+
+      2. SMART CLIENT EMAIL:
+      - Draft clarifications. Never ask a question you can answer yourself. Connect the dots.
+      - EXAMPLE GOOD: "Last year, we claimed $1,200 for insurance. Your current spreadsheet lists $0. Did you pay the insurance policy this year, or was it perhaps missed in the upload?"
+
+      # OUTPUT FORMAT (STRICT JSON):
       {
         "tax_year": number,
         "properties": [
           {
-            "address": "string (from Prior T776)",
+            "address": "string",
             "income": {
-              "category_name": { "amount": number, "source_file": "string (filename or Email.msg > Attachment)" }
+              "category_name": { "amount": number, "source_file": "string" }
             },
             "income_prior": { "category_name": number },
             "expenses": {
               "category_name": { "amount": number, "source_file": "string" }
             },
             "expenses_prior": { "category_name": number },
-            "source_files_read": ["string (all files you referenced for this property)"],
-            "notes": "string (Identify missing info, or note if a new property was found not in Prior T776)"
+            "source_files_read": ["string"],
+            "notes": "string (Include LOGICAL DISCONNECTS found and AI ADJUSTMENTS here)"
           }
         ],
         "email_draft": "string",
-        "all_files_detected": ["string (all files you saw in the input)"]
+        "all_files_detected": ["string"]
       }
     `;
 

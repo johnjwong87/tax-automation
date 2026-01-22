@@ -216,8 +216,8 @@ export default function Home() {
                     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
                         <div className="flex items-center justify-between border-b border-gray-200 pb-5">
                             <div>
-                                <h2 className="text-3xl font-black text-gray-900 tracking-tight">Analysis Complete</h2>
-                                <p className="text-gray-500 mt-1 font-medium">Verify your properties and categories below.</p>
+                                <h2 className="text-3xl font-black text-gray-900 tracking-tight">Tax Review Complete</h2>
+                                <p className="text-gray-500 mt-1 font-medium">Triangulated reporting from Historical, Benchmark, and Current sources.</p>
                             </div>
                             <button
                                 onClick={handleDownloadPackage}
