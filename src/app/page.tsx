@@ -145,6 +145,9 @@ export default function Home() {
                         <span className="text-xl font-extrabold tracking-tight text-gray-900">
                             TaxFlow <span className="text-blue-600 underline decoration-blue-200 underline-offset-4">Rental</span>
                         </span>
+                        <span className="ml-3 px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-black rounded-md border border-blue-200 uppercase tracking-widest">
+                            v2.0 Senior CPA
+                        </span>
                     </div>
                 </div>
             </header>
