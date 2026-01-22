@@ -23,48 +23,17 @@ interface AnalysisResult {
     all_files_detected: string[];
 }
 
-export async function generateAuditPackage(result: AnalysisResult, originalFiles: File[]): Promise<Blob> {
-    const zip = new JSZip();
-    const sourceFolder = zip.folder("Source_Documents");
-    if (!sourceFolder) throw new Error("Could not create ZIP folder");
-
-    console.log("Generating Audit Package...");
-
-    // 1. Add Original Files to the ZIP
-    for (const file of originalFiles) {
-        const buffer = await file.arrayBuffer();
-        const zipPath = file.webkitRelativePath || file.name;
-        sourceFolder.file(zipPath, buffer);
-
-        if (file.name.toLowerCase().endsWith(".msg")) {
-            try {
-                const reader = new MsgReader(buffer);
-                const data = reader.getFileData();
-                if (data.attachments) {
-                    const msgFolderName = `${file.webkitRelativePath || file.name}_attachments`;
-                    for (const attach of data.attachments) {
-                        const attachmentData = reader.getAttachment(attach);
-                        if (attachmentData) {
-                            sourceFolder.file(`${msgFolderName}/${attachmentData.fileName}`, attachmentData.content);
-                        }
-                    }
-                }
-            } catch (err) {
-                console.error(`Failed to extra attachments from ${file.name}`, err);
-            }
-        }
-    }
-
-    // 2. Generate the Excel Workbook
+/**
+ * Generates only the Excel summary workbook as a Blob.
+ */
+export async function generateExcelSummary(result: AnalysisResult): Promise<Blob> {
     const workbook = XLSX.utils.book_new();
-
     const currentYearLabel = result.tax_year ? `Current (${result.tax_year})` : "Current Year";
     const priorYearLabel = result.tax_year ? `Prior (${result.tax_year - 1})` : "Prior Year";
 
     result.properties.forEach((prop, idx) => {
         const sheetName = (prop.address || `Prop ${idx + 1}`).substring(0, 31);
         const rows: any[][] = [];
-
         rows.push(["PROPERTY SUMMARY", prop.address || "Unknown"]);
         rows.push([""]);
 
@@ -83,10 +52,8 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
             const currentObj = prop.income?.[cat];
             const current = typeof currentObj === 'object' ? currentObj.amount : (currentObj || 0);
             const source = typeof currentObj === 'object' ? currentObj.source_file : "";
-
             const row = [cat, prior, current, current - prior, source];
             rows.push(row);
-
             totalPrior += prior;
             totalCurrent += current;
         });
@@ -107,10 +74,8 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
             const currentObj = prop.expenses?.[cat];
             const current = typeof currentObj === 'object' ? currentObj.amount : (currentObj || 0);
             const source = typeof currentObj === 'object' ? currentObj.source_file : "";
-
             const row = [cat, prior, current, current - prior, source];
             rows.push(row);
-
             totalExpPrior += prior;
             totalExpCurrent += current;
         });
@@ -201,33 +166,71 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
 
     const manifestRows = [["FULL AUDIT TRAIL - ALL FILES PROCESSED"], [""]];
     result.all_files_detected?.forEach(f => manifestRows.push([f]));
-
     const citedFiles = new Set<string>();
     result.properties.forEach(prop => {
         Object.values(prop.income || {}).forEach(m => { if (m.source_file) citedFiles.add(m.source_file); });
         Object.values(prop.expenses || {}).forEach(m => { if (m.source_file) citedFiles.add(m.source_file); });
     });
-
     const unusedFiles = (result.all_files_detected || []).filter(f => {
         const isReference = f.startsWith("PRIOR") || f.startsWith("TEMPLATE");
         return !isReference && !citedFiles.has(f);
     });
-
     if (unusedFiles.length > 0) {
         manifestRows.push([""]);
         manifestRows.push(["UNUSED FILES (FOR REVIEW)"]);
         unusedFiles.forEach(f => manifestRows.push([f]));
     }
-
     const manifestSheet = XLSX.utils.aoa_to_sheet(manifestRows);
     XLSX.utils.book_append_sheet(workbook, manifestSheet, "Audit Trail");
 
     const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-    zip.file("T776_Tax_Summary.xlsx", new Uint8Array(excelBuffer));
+    return new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
 
+/**
+ * Generates the full ZIP package containing Excel summary and Source Documents.
+ */
+export async function generateAuditPackage(result: AnalysisResult, originalFiles: File[]): Promise<Blob> {
+    const zip = new JSZip();
+    const sourceFolder = zip.folder("Source_Documents");
+    if (!sourceFolder) throw new Error("Could not create ZIP folder");
+
+    console.log("Generating Audit Package ZIP...");
+
+    // 1. Add Original Files to the ZIP
+    for (const file of originalFiles) {
+        const buffer = await file.arrayBuffer();
+        const zipPath = file.webkitRelativePath || file.name;
+        sourceFolder.file(zipPath, buffer);
+
+        if (file.name.toLowerCase().endsWith(".msg")) {
+            try {
+                const reader = new MsgReader(buffer);
+                const data = reader.getFileData();
+                if (data.attachments) {
+                    const msgFolderName = `${file.webkitRelativePath || file.name}_attachments`;
+                    for (const attach of data.attachments) {
+                        const attachmentData = reader.getAttachment(attach);
+                        if (attachmentData) {
+                            sourceFolder.file(`${msgFolderName}/${attachmentData.fileName}`, attachmentData.content);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error(`Failed to extra attachments from ${file.name}`, err);
+            }
+        }
+    }
+
+    // 2. Add the Excel Summary to the ZIP
+    const excelBlob = await generateExcelSummary(result);
+    const excelArrayBuffer = await excelBlob.arrayBuffer();
+    zip.file("T776_Tax_Summary.xlsx", new Uint8Array(excelArrayBuffer));
+
+    // 3. Generate the ZIP Blob
     const zipBlob = await zip.generateAsync({
         type: "blob",
-        mimeType: "application/octet-stream",
+        mimeType: "application/zip",
         compression: "DEFLATE",
         compressionOptions: { level: 6 }
     });

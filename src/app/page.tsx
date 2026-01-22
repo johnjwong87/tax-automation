@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { FileUpload } from "@/components/file-upload";
 import { Loader2, FileSpreadsheet, Package, Upload } from "lucide-react";
-import { generateAuditPackage } from "@/utils/export-client";
+import { generateAuditPackage, generateExcelSummary } from "@/utils/export-client";
 import { upload } from "@vercel/blob/client";
 
 interface SourceMapping {
@@ -39,8 +39,6 @@ export default function Home() {
     const [uploadProgress, setUploadProgress] = useState("");
     const [result, setResult] = useState<AnalysisResult | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-    const [downloadFilename, setDownloadFilename] = useState<string>("");
 
     const handleAnalyze = async () => {
         if (filesCurrent.length === 0) return;
@@ -106,37 +104,48 @@ export default function Home() {
     const handleDownloadPackage = async () => {
         if (!result) return;
         setIsExporting(true);
-        setDownloadUrl(null); // Reset previous
         try {
             const blob = await generateAuditPackage(result, [...filesCurrent, ...filesPrior, ...filesT776]);
-            const finalFilename = `Rental_Tax_Audit_${result.tax_year || 'Summary'}.zip`;
-
+            const filename = `Rental_Tax_Audit_${result.tax_year || 'Package'}.zip`;
             const url = window.URL.createObjectURL(blob);
-            setDownloadUrl(url);
-            setDownloadFilename(finalFilename);
-
-            // Automatic trigger (Nuclear version)
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = finalFilename;
-            link.style.display = 'none';
-            document.body.appendChild(link);
-
-            // Dispatch native click
-            const clickEvt = new MouseEvent('click', {
-                view: window,
-                bubbles: true,
-                cancelable: true
-            });
-            link.dispatchEvent(clickEvt);
-
-            // Keep link on DOM for cleanup
+            const a = document.createElement("a");
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
             setTimeout(() => {
-                if (document.body.contains(link)) document.body.removeChild(link);
-            }, 60000);
+                if (document.body.contains(a)) document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            }, 10000);
         } catch (e) {
             console.error("ZIP Generation Error:", e);
-            alert("Failed to generate ZIP. Check browser console.");
+            alert("Failed to generate Full Package ZIP.");
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const handleDownloadExcel = async () => {
+        if (!result) return;
+        setIsExporting(true);
+        try {
+            const blob = await generateExcelSummary(result);
+            const filename = `Rental_Tax_Summary_${result.tax_year || 'Draft'}.xlsx`;
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                if (document.body.contains(a)) document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            }, 10000);
+        } catch (e) {
+            console.error("Excel Generation Error:", e);
+            alert("Failed to generate Excel summary.");
         } finally {
             setIsExporting(false);
         }
@@ -246,39 +255,37 @@ export default function Home() {
                                 <h2 className="text-3xl font-black text-gray-900 tracking-tight">Tax Review Complete</h2>
                                 <p className="text-gray-500 mt-1 font-medium">Triangulated reporting from Historical, Benchmark, and Current sources.</p>
                             </div>
-                            <div className="flex flex-col items-end gap-2">
-                                <button
-                                    onClick={handleDownloadPackage}
-                                    disabled={isExporting}
-                                    className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 hover:shadow-green-900/20 active:translate-y-0.5 transition-all disabled:opacity-50"
-                                >
-                                    {isExporting ? (
-                                        <>
-                                            <Loader2 className="w-5 h-5 mr-3 animate-spin" />
-                                            Generating ZIP...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Package className="w-5 h-5 mr-3" />
-                                            Download Audit Package (.ZIP)
-                                        </>
-                                    )}
-                                </button>
+                            <div className="flex flex-col items-end gap-3">
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={handleDownloadExcel}
+                                        disabled={isExporting}
+                                        className="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 hover:shadow-blue-900/20 active:translate-y-0.5 transition-all disabled:opacity-50"
+                                    >
+                                        <FileSpreadsheet className="w-5 h-5 mr-3" />
+                                        Download Summary Only (.XLSX)
+                                    </button>
+                                    <button
+                                        onClick={handleDownloadPackage}
+                                        disabled={isExporting}
+                                        className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 hover:shadow-green-900/20 active:translate-y-0.5 transition-all disabled:opacity-50"
+                                    >
+                                        {isExporting ? (
+                                            <>
+                                                <Loader2 className="w-5 h-5 mr-3 animate-spin" />
+                                                Generating...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Package className="w-5 h-5 mr-3" />
+                                                Download Full Package (.ZIP)
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
                                 <p className="text-[10px] text-gray-400 font-medium italic">
-                                    Includes Excel Summary + All Source Files
+                                    Package includes Excel Summary + All Original Source Files
                                 </p>
-                                {downloadUrl && (
-                                    <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-center animate-in fade-in zoom-in duration-300">
-                                        <p className="text-[11px] text-yellow-800 font-bold mb-1">Download not starting?</p>
-                                        <a
-                                            href={downloadUrl}
-                                            download={downloadFilename}
-                                            className="text-sm text-blue-600 font-black underline hover:text-blue-800"
-                                        >
-                                            Click here for Manual Download
-                                        </a>
-                                    </div>
-                                )}
                             </div>
                         </div>
 
