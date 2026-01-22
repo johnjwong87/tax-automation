@@ -35,10 +35,13 @@ export default function Home() {
 
     const [isUploading, setIsUploading] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [isExporting, setIsExporting] = useState(false);
     const [uploadProgress, setUploadProgress] = useState("");
     const [result, setResult] = useState<AnalysisResult | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [zipUrl, setZipUrl] = useState<string | null>(null);
+    const [excelUrl, setExcelUrl] = useState<string | null>(null);
+    const [isGeneratingZip, setIsGeneratingZip] = useState(false);
+    const [isGeneratingExcel, setIsGeneratingExcel] = useState(false);
 
     const handleAnalyze = async () => {
         if (filesCurrent.length === 0) return;
@@ -101,61 +104,54 @@ export default function Home() {
         }
     };
 
-    const handleDownloadPackage = async () => {
+    const handleGeneratePackage = async () => {
         if (!result) return;
-        setIsExporting(true);
+        setIsGeneratingZip(true);
+        setZipUrl(null);
         try {
             const blob = await generateAuditPackage(result, [...filesCurrent, ...filesPrior, ...filesT776]);
-            const filename = `Rental_Tax_Audit_${result.tax_year || 'Package'}.zip`;
             const url = window.URL.createObjectURL(blob);
+            setZipUrl(url);
+            // Help the browser by doing one trigger
             const a = document.createElement("a");
-            a.style.display = 'none';
             a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
+            a.download = `Rental_Tax_Package_${result.tax_year || 'Audit'}.zip`;
             a.click();
-            setTimeout(() => {
-                if (document.body.contains(a)) document.body.removeChild(a);
-                window.URL.revokeObjectURL(url);
-            }, 10000);
         } catch (e) {
-            console.error("ZIP Generation Error:", e);
-            alert("Failed to generate Full Package ZIP.");
+            console.error("ZIP Error:", e);
+            alert("Failed to build ZIP package.");
         } finally {
-            setIsExporting(false);
+            setIsGeneratingZip(false);
         }
     };
 
-    const handleDownloadExcel = async () => {
+    const handleGenerateExcel = async () => {
         if (!result) return;
-        setIsExporting(true);
+        setIsGeneratingExcel(true);
+        setExcelUrl(null);
         try {
             const blob = await generateExcelSummary(result);
-            const filename = `Rental_Tax_Summary_${result.tax_year || 'Draft'}.xlsx`;
             const url = window.URL.createObjectURL(blob);
+            setExcelUrl(url);
+            // Help the browser
             const a = document.createElement("a");
-            a.style.display = 'none';
             a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
+            a.download = `Rental_Tax_Summary_${result.tax_year || 'Audit'}.xlsx`;
             a.click();
-            setTimeout(() => {
-                if (document.body.contains(a)) document.body.removeChild(a);
-                window.URL.revokeObjectURL(url);
-            }, 10000);
         } catch (e) {
-            console.error("Excel Generation Error:", e);
-            alert("Failed to generate Excel summary.");
+            console.error("Excel Error:", e);
+            alert("Failed to build Excel summary.");
         } finally {
-            setIsExporting(false);
+            setIsGeneratingExcel(false);
         }
     };
+
+    const isExporting = isGeneratingZip || isGeneratingExcel;
 
     const isProcessing = isUploading || isAnalyzing;
 
     return (
         <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
-            <title>TaxFlow Rental Automation</title>
             <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -258,33 +254,67 @@ export default function Home() {
                             <div className="flex flex-col items-end gap-3">
                                 <div className="flex gap-4">
                                     <button
-                                        onClick={handleDownloadExcel}
+                                        onClick={handleGenerateExcel}
                                         disabled={isExporting}
-                                        className="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 hover:shadow-blue-900/20 active:translate-y-0.5 transition-all disabled:opacity-50"
+                                        className="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 active:translate-y-0.5 transition-all disabled:opacity-50"
                                     >
-                                        <FileSpreadsheet className="w-5 h-5 mr-3" />
-                                        Download Summary Only (.XLSX)
+                                        {isGeneratingExcel ? (
+                                            <Loader2 className="w-5 h-5 mr-3 animate-spin" />
+                                        ) : (
+                                            <FileSpreadsheet className="w-5 h-5 mr-3" />
+                                        )}
+                                        Build Summary Only (.XLSX)
                                     </button>
                                     <button
-                                        onClick={handleDownloadPackage}
+                                        onClick={handleGeneratePackage}
                                         disabled={isExporting}
-                                        className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 hover:shadow-green-900/20 active:translate-y-0.5 transition-all disabled:opacity-50"
+                                        className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 active:translate-y-0.5 transition-all disabled:opacity-50"
                                     >
-                                        {isExporting ? (
-                                            <>
-                                                <Loader2 className="w-5 h-5 mr-3 animate-spin" />
-                                                Generating...
-                                            </>
+                                        {isGeneratingZip ? (
+                                            <Loader2 className="w-5 h-5 mr-3 animate-spin" />
                                         ) : (
-                                            <>
-                                                <Package className="w-5 h-5 mr-3" />
-                                                Download Full Package (.ZIP)
-                                            </>
+                                            <Package className="w-5 h-5 mr-3" />
                                         )}
+                                        Build Full ZIP Package
                                     </button>
                                 </div>
+
+                                {(zipUrl || excelUrl) && (
+                                    <div className="bg-yellow-50 border-2 border-yellow-200 p-4 rounded-2xl space-y-3 w-full animate-in zoom-in duration-300 shadow-inner">
+                                        <h4 className="text-yellow-800 font-black text-sm uppercase tracking-wider text-center">
+                                            📥 Download Zone
+                                        </h4>
+                                        <div className="flex flex-col gap-2">
+                                            {excelUrl && (
+                                                <a
+                                                    href={excelUrl}
+                                                    download={`Rental_Tax_Summary_${result.tax_year || 'Audit'}.xlsx`}
+                                                    className="w-full py-2 bg-white border-2 border-blue-400 text-blue-700 rounded-lg text-xs font-black text-center shadow-sm hover:bg-blue-50 transition-colors flex items-center justify-center gap-2"
+                                                >
+                                                    <FileSpreadsheet className="w-3 h-3" />
+                                                    CLICK TO SAVE EXCEL SUMMARY
+                                                </a>
+                                            )}
+                                            {zipUrl && (
+                                                <a
+                                                    href={zipUrl}
+                                                    download={`Rental_Tax_Package_${result.tax_year || 'Audit'}.zip`}
+                                                    className="w-full py-2 bg-white border-2 border-green-400 text-green-700 rounded-lg text-xs font-black text-center shadow-sm hover:bg-green-50 transition-colors flex items-center justify-center gap-2"
+                                                >
+                                                    <Package className="w-3 h-3" />
+                                                    CLICK TO SAVE FULL ZIP
+                                                </a>
+                                            )}
+                                        </div>
+                                        <div className="pt-2 border-t border-yellow-200">
+                                            <p className="text-[10px] text-yellow-700 leading-tight text-center">
+                                                <strong>TIP:</strong> If the file has a name like <em>"e6ce5b3b..."</em> after downloading, simply <strong>Rename it</strong> to add <strong>.xlsx</strong> or <strong>.zip</strong> to the end.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
                                 <p className="text-[10px] text-gray-400 font-medium italic">
-                                    Package includes Excel Summary + All Original Source Files
+                                    Package includes Excel Summary + All Original Receipts
                                 </p>
                             </div>
                         </div>
