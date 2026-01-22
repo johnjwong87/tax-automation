@@ -112,11 +112,7 @@ export default function Home() {
             const blob = await generateAuditPackage(result, [...filesCurrent, ...filesPrior, ...filesT776]);
             const url = window.URL.createObjectURL(blob);
             setZipUrl(url);
-            // Help the browser by doing one trigger
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `Rental_Tax_Package_${result.tax_year || 'Audit'}.zip`;
-            a.click();
+            console.log("Package generated successfully:", blob.size, "bytes");
         } catch (e) {
             console.error("ZIP Error:", e);
             alert("Failed to build ZIP package.");
@@ -133,11 +129,7 @@ export default function Home() {
             const blob = await generateExcelSummary(result);
             const url = window.URL.createObjectURL(blob);
             setExcelUrl(url);
-            // Help the browser
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `Rental_Tax_Summary_${result.tax_year || 'Audit'}.xlsx`;
-            a.click();
+            console.log("Excel generated successfully:", blob.size, "bytes");
         } catch (e) {
             console.error("Excel Error:", e);
             alert("Failed to build Excel summary.");

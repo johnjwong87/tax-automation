@@ -227,12 +227,13 @@ export async function generateAuditPackage(result: AnalysisResult, originalFiles
     const excelArrayBuffer = await excelBlob.arrayBuffer();
     zip.file("T776_Tax_Summary.xlsx", new Uint8Array(excelArrayBuffer));
 
-    // 3. Generate the ZIP Blob
-    const zipBlob = await zip.generateAsync({
-        type: "blob",
-        mimeType: "application/zip",
+    // 3. Generate the ZIP Blob safely using a standard Buffer
+    const zipData = await zip.generateAsync({
+        type: "uint8array",
         compression: "DEFLATE",
         compressionOptions: { level: 6 }
     });
-    return zipBlob;
+
+    // Cast as any to avoid SharedArrayBuffer vs ArrayBuffer typing issues in some environments
+    return new Blob([(zipData.buffer as any)], { type: "application/zip" });
 }
